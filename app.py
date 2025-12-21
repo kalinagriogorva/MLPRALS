@@ -974,12 +974,12 @@ with st.container(border=True):
     st.subheader("SME eligibility check (EU definition)")
     st.write("Eligibility criteria:")
     st.write("- Employees: fewer than 250")
-    st.write("- And either turnover ≤ €50m or balance sheet total ≤ €43m")
+    st.write("- And either turnover ≤ €50mill or balance sheet total ≤ €43mill")
 
     c1, c2, c3, c4 = st.columns(4)
     employees = c1.number_input("Employees", min_value=0, step=1, value=0)
-    turnover_m = c2.number_input("Turnover (€m)", min_value=0.0, step=0.1, value=0.0)
-    balance_m = c3.number_input("Balance sheet (€m)", min_value=0.0, step=0.1, value=0.0)
+    turnover_m = c2.number_input("Turnover (€mill)", min_value=0.0, step=0.1, value=0.0)
+    balance_m = c3.number_input("Balance sheet (€mill)", min_value=0.0, step=0.1, value=0.0)
 
     eligible_label = "N/A"
     if st.session_state["is_sme"] is True:
