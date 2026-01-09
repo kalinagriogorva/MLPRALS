@@ -27,14 +27,12 @@ logo_b64 = img_to_base64("logo.png")
 st.markdown(
     f"""
     <style>
-      /* Remove Streamlit default side padding so header can be full-width WITHOUT hacks */
       section.main > div {{
         padding-left: 0rem !important;
         padding-right: 0rem !important;
-        padding-top: 0.35rem !important; /* small top spacing under Streamlit toolbar */
+        padding-top: 0.35rem !important;
       }}
 
-      /* Header bar */
       .mlprals-header {{
         width: 100%;
         background: {FONTYS_PURPLE};
@@ -42,7 +40,6 @@ st.markdown(
         box-shadow: 0 6px 18px rgba(0,0,0,0.25);
       }}
 
-      /* Header inner layout */
       .mlprals-header-inner {{
         display: flex;
         align-items: center;
@@ -81,7 +78,6 @@ st.markdown(
         font-size: 14px !important;
       }}
 
-      /* Content wrapper (re-add normal padding for everything below header) */
       .mlprals-content {{
         padding: 22px 28px;
         max-width: 1280px;
@@ -95,17 +91,14 @@ st.markdown(
         .mlprals-logo {{ width: 64px; height: 64px; border-radius: 12px; }}
       }}
 
-      /* Headings color */
       h2, h3, h4 {{ color: {FONTYS_PURPLE}; }}
 
-      /* Expander accent */
       div[data-testid="stExpander"] > details {{
         border-left: 4px solid {FONTYS_PURPLE};
         border-radius: 10px;
         padding-left: 0.5rem;
       }}
 
-      /* Buttons */
       .stButton > button {{
         background: {FONTYS_PURPLE};
         color: white;
@@ -119,7 +112,6 @@ st.markdown(
         border: 1px solid {FONTYS_PURPLE};
       }}
 
-      /* Download button to match */
       div[data-testid="stDownloadButton"] > button {{
         background: {FONTYS_PURPLE};
         color: white;
@@ -133,17 +125,14 @@ st.markdown(
         border: 1px solid {FONTYS_PURPLE};
       }}
 
-      /* Progress bar */
       div[data-testid="stProgressBar"] > div > div {{
         background-color: {FONTYS_PURPLE} !important;
       }}
 
-      /* Alerts accent */
       div[data-testid="stAlert"] {{
         border-left: 6px solid {FONTYS_PURPLE} !important;
       }}
 
-      /* Metric label */
       div[data-testid="stMetricLabel"] {{
         color: {FONTYS_PURPLE};
       }}
@@ -152,9 +141,6 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# =========================
-# Header (logo embedded using base64 so it ALWAYS shows)
-# =========================
 logo_html = (
     f'<img src="data:image/png;base64,{logo_b64}" alt="Fontys logo" />'
     if logo_b64
@@ -982,27 +968,66 @@ def build_export_df_partial(company: str) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 # =========================
+# Reset helper 
+# =========================
+def reset_all_state():
+    # Clear question-related keys (levels + checkboxes + overrides)
+    for cat, questions in QUESTION_BANK.items():
+        for q in questions:
+            concept = q["concept"]
+            keys_to_clear = [
+                get_qkey(cat, concept),
+                get_override_key(cat, concept),
+                get_override_level_key(cat, concept),
+                get_help_key(cat, concept, "a"),
+                get_help_key(cat, concept, "b"),
+                get_help_key(cat, concept, "c"),
+                get_help_key(cat, concept, "rt"),
+                get_none_key(cat, concept),
+            ]
+            # Force checkboxes OFF (helps avoid UI “ghost” state), then delete
+            for k in keys_to_clear:
+                if k in st.session_state:
+                    # Only set False for checkbox-like keys
+                    if k.startswith("help::"):
+                        st.session_state[k] = False
+                    del st.session_state[k]
+
+    # Clear import/export related session keys
+    for k in ["company_name_loaded", "auto_loaded_signature", "answers_uploader"]:
+        if k in st.session_state:
+            del st.session_state[k]
+
+    # Keep eligibility/sector choices? Usually reset should not undo gating,
+    # but your request was "reset answers" only. So we don't clear gating keys here.
+
+# =========================
 # Overview
 # =========================
 st.subheader("Assessment overview")
 st.write(
     "The assessment contains 40 questions (8 dimensions × 5 concepts).\n\n"
     "- Checklist selection determines the level automatically.\n"
-    "- **None of the above** (last option) assigns **Level 1**.\n"
+    "- **None of the above** assigns **Level 1**.\n"
     "- If nothing is selected, the answer is invalid.\n"
     "- Manual override is available via **Change this level**.\n"
-    "- Importing a previously exported answers file auto-fills levels (partial files are accepted)."
+    "- Importing a previously exported answers file auto-fills levels (partial files are accepted).\n"
+    "- Export is available at any time (unanswered questions export as blank)."
 )
 
 st.divider()
 
-# =========================
-# Step 1 — SME Eligibility (gated)
-# =========================
-if "eligibility_checked" not in st.session_state:
-    st.session_state["eligibility_checked"] = False
+# ============================================================
+# Gate 1: SME Eligibility (starts at N/A until checked)
+# ============================================================
+if "eligibility_confirmed" not in st.session_state:
+    st.session_state["eligibility_confirmed"] = False
 if "is_sme" not in st.session_state:
     st.session_state["is_sme"] = None
+if "allow_continue_non_sme" not in st.session_state:
+    st.session_state["allow_continue_non_sme"] = False
+if "eligibility_snapshot" not in st.session_state:
+    st.session_state["eligibility_snapshot"] = None
 
 with st.container(border=True):
     st.subheader("SME eligibility check (EU definition)")
@@ -1010,34 +1035,142 @@ with st.container(border=True):
     st.write("- Employees: fewer than 250")
     st.write("- And either turnover ≤ €50mill or balance sheet total ≤ €43mill")
 
-    c1, c2, c3, c4 = st.columns(4)
-    employees = c1.number_input("Employees", min_value=0, step=1, value=0)
-    turnover_m = c2.number_input("Turnover (€mill)", min_value=0.0, step=0.1, value=0.0)
-    balance_m = c3.number_input("Balance sheet (€mill)", min_value=0.0, step=0.1, value=0.0)
+    with st.form("eligibility_form", clear_on_submit=False):
+        c1, c2, c3, c4 = st.columns(4)
+        employees = c1.number_input("Employees", min_value=0, step=1, value=0)
+        turnover_m = c2.number_input("Turnover (€mill)", min_value=0.0, step=0.1, value=0.0)
+        balance_m = c3.number_input("Balance sheet (€mill)", min_value=0.0, step=0.1, value=0.0)
 
-    eligible_label = "N/A"
+        # What the result WOULD be if they click check
+        is_sme_live = (employees < 250) and ((turnover_m <= 50.0) or (balance_m <= 43.0))
+
+        # Show N/A until user clicks "Check eligibility"
+        if not st.session_state["eligibility_confirmed"]:
+            eligible_label = "N/A"
+        else:
+            # If values changed since last check, show "STALE" to nudge re-check
+            snap = st.session_state.get("eligibility_snapshot", None)
+            changed = snap is not None and snap != (employees, float(turnover_m), float(balance_m))
+            if changed:
+                eligible_label = "STALE ⚠️ (re-check)"
+            else:
+                eligible_label = "YES ✅" if st.session_state["is_sme"] else "NO ❌"
+
+        c4.metric("Eligible?", eligible_label)
+
+        submitted = st.form_submit_button("Check eligibility")
+        if submitted:
+            st.session_state["eligibility_confirmed"] = True
+            st.session_state["is_sme"] = bool(is_sme_live)
+            st.session_state["eligibility_snapshot"] = (employees, float(turnover_m), float(balance_m))
+            st.session_state["allow_continue_non_sme"] = False
+            st.rerun()
+
+    # Gate behavior
+    if not st.session_state["eligibility_confirmed"]:
+        st.info("Enter SME details and click **Check eligibility** to continue.")
+        st.markdown("</div>", unsafe_allow_html=True)
+        st.stop()
+
+    # If checked but values changed, require re-check (prevents stale YES/NO)
+    snap = st.session_state.get("eligibility_snapshot", None)
+    if snap is not None and snap != (employees, float(turnover_m), float(balance_m)):
+        st.info("Inputs changed since the last eligibility check. Click **Check eligibility** again to update the result.")
+        st.markdown("</div>", unsafe_allow_html=True)
+        st.stop()
+
+    # Outcome (but still allow continue if not SME)
     if st.session_state["is_sme"] is True:
-        eligible_label = "YES ✅"
-    elif st.session_state["is_sme"] is False:
-        eligible_label = "NO ❌"
+        st.success("Eligible SME confirmed.")
+    else:
+        st.warning(
+            "This company does **not** meet the EU SME definition used by the framework.\n\n"
+            "You can still continue if you want, but interpret the outcomes carefully (the framework was designed for SMEs)."
+        )
+        st.session_state["allow_continue_non_sme"] = st.checkbox(
+            "I understand. Let me continue anyway.",
+            value=st.session_state.get("allow_continue_non_sme", False),
+            key="continue_non_sme_checkbox",
+        )
 
-    c4.metric("Eligible?", eligible_label)
+        if not st.session_state["allow_continue_non_sme"]:
+            st.markdown("</div>", unsafe_allow_html=True)
+            st.stop()
 
-    if st.button("Check eligibility", key="check_eligibility_btn"):
-        st.session_state["eligibility_checked"] = True
-        st.session_state["is_sme"] = (employees < 250) and ((turnover_m <= 50.0) or (balance_m <= 43.0))
+st.divider()
 
-if not st.session_state["eligibility_checked"]:
-    st.info("Enter SME details and click **Check eligibility** to continue.")
-    st.markdown("</div>", unsafe_allow_html=True)  # close content wrapper
-    st.stop()
+# ============================================================
+# Gate 2: Sector applicability (logistics)
+# - Framework originally created for logistics SMEs
+# - Allow continuing with warning if not logistics
+# ============================================================
+# =========================
+# Sector applicability (radio-style, starts empty)
+# =========================
+if "sector_confirmed" not in st.session_state:
+    st.session_state["sector_confirmed"] = False
+if "is_logistics" not in st.session_state:
+    st.session_state["is_logistics"] = None
+if "allow_continue_non_logistics" not in st.session_state:
+    st.session_state["allow_continue_non_logistics"] = False
 
-if st.session_state["is_sme"] is False:
-    st.error("Not eligible (assessment is designed for SMEs).")
-    st.markdown("</div>", unsafe_allow_html=True)
-    st.stop()
+with st.container(border=True):
+    st.subheader("Sector applicability")
+    st.write("MLPRALS was originally designed for **logistics SMEs**.")
 
-st.success("Eligible SME confirmed. Assessment can proceed.")
+    # Show current selection (or none)
+    current_label = (
+        "Not selected"
+        if st.session_state["is_logistics"] is None and not st.session_state["sector_confirmed"]
+        else "Yes" if st.session_state["is_logistics"] is True
+        else "No" if st.session_state["is_logistics"] is False
+        else "Not sure"
+    )
+    st.caption(f"Current selection: **{current_label}**")
+
+    c1, c2, c3 = st.columns(3)
+
+    if c1.button("Yes", use_container_width=True):
+        st.session_state["is_logistics"] = True
+        st.session_state["sector_confirmed"] = True
+        st.session_state["allow_continue_non_logistics"] = False
+        st.rerun()
+
+    if c2.button("No", use_container_width=True):
+        st.session_state["is_logistics"] = False
+        st.session_state["sector_confirmed"] = True
+        st.session_state["allow_continue_non_logistics"] = False
+        st.rerun()
+
+    if c3.button("Not sure", use_container_width=True):
+        st.session_state["is_logistics"] = None
+        st.session_state["sector_confirmed"] = True
+        st.session_state["allow_continue_non_logistics"] = False
+        st.rerun()
+
+    # Gate
+    if not st.session_state["sector_confirmed"]:
+        st.info("Please select an option to continue.")
+        st.markdown("</div>", unsafe_allow_html=True)
+        st.stop()
+
+    if st.session_state["is_logistics"] is True:
+        st.success("Logistics company confirmed.")
+    elif st.session_state["is_logistics"] is False:
+        st.warning(
+            "This framework was designed for logistics SMEs.\n\n"
+            "You may continue, but interpret results with caution."
+        )
+        st.session_state["allow_continue_non_logistics"] = st.checkbox(
+            "I understand. Let me continue anyway.",
+            value=st.session_state.get("allow_continue_non_logistics", False),
+        )
+        if not st.session_state["allow_continue_non_logistics"]:
+            st.markdown("</div>", unsafe_allow_html=True)
+            st.stop()
+    else:
+        st.info("Sector marked as **Not sure**. You may continue, but interpret results carefully.")
+
 st.divider()
 
 # =========================
@@ -1060,8 +1193,8 @@ st.caption(
     "Upload a previously exported **answers CSV** to auto-fill selected levels.\n"
     "Partial files are accepted — any matching rows will be applied."
 )
-uploaded = st.file_uploader("Upload answers CSV", type=["csv"])
 
+uploaded = st.file_uploader("Upload answers CSV", type=["csv"], key="answers_uploader")
 
 def auto_load_answers_from_csv(df: pd.DataFrame) -> int:
     required_cols = {"Dimension", "Concept", "Selected level"}
@@ -1072,9 +1205,12 @@ def auto_load_answers_from_csv(df: pd.DataFrame) -> int:
     for _, row in df.iterrows():
         dim = str(row["Dimension"]).strip()
         concept = str(row["Concept"]).strip()
+
+        raw = row.get("Selected level", "")
         try:
-            lvl = int(row["Selected level"])
+            lvl = int(raw)
         except Exception:
+            # allow blanks / partial rows
             continue
 
         if dim in QUESTION_BANK:
@@ -1085,7 +1221,6 @@ def auto_load_answers_from_csv(df: pd.DataFrame) -> int:
                 st.session_state[get_override_level_key(dim, concept)] = lvl
                 loaded += 1
     return loaded
-
 
 if uploaded is not None:
     try:
@@ -1111,38 +1246,20 @@ if uploaded is not None:
                 st.success(f"Auto-filled answers: {loaded_count}.")
                 st.rerun()
             else:
-                st.warning("No matching answers were found in the uploaded file.")
+                st.warning("No matching answers were found in the uploaded file (or the file contains blanks only).")
     except Exception as e:
         st.error(f"Uploaded CSV could not be processed: {e}")
 
 st.divider()
 
 # =========================
-# Reset
+# Reset (fix checkbox persistence)
 # =========================
 with st.container(border=True):
     st.subheader("Reset answers (optional)")
-    st.caption("Clears all answers, overrides, and uploaded auto-fill state for the current session.")
+    st.caption("Clears all answers, overrides, and imported state for the current session.")
     if st.button("Reset all answers", key="reset_all_btn"):
-        for cat, questions in QUESTION_BANK.items():
-            for q in questions:
-                concept = q["concept"]
-                keys_to_clear = [
-                    get_qkey(cat, concept),
-                    get_override_key(cat, concept),
-                    get_override_level_key(cat, concept),
-                    get_help_key(cat, concept, "a"),
-                    get_help_key(cat, concept, "b"),
-                    get_help_key(cat, concept, "c"),
-                    get_help_key(cat, concept, "rt"),
-                    get_none_key(cat, concept),
-                ]
-                for k in keys_to_clear:
-                    if k in st.session_state:
-                        del st.session_state[k]
-        for k in ["company_name_loaded", "auto_loaded_signature"]:
-            if k in st.session_state:
-                del st.session_state[k]
+        reset_all_state()
         st.success("All answers cleared.")
         st.rerun()
 
@@ -1200,7 +1317,7 @@ st.subheader("Questions")
 st.info(
     "Checklist selection determines a level.\n"
     "- If nothing is selected, the answer is invalid.\n"
-    "- If **None of the above** is selected (last option), the result is **Level 1**.\n"
+    "- If **None of the above** is selected, the result is **Level 1**.\n"
     "- Otherwise, the result is calculated automatically (Level 2–5)."
 )
 
@@ -1321,7 +1438,7 @@ if missing:
     with st.expander("Show missing fields"):
         for m in missing:
             st.write(f"- {m}")
-    st.markdown("</div>", unsafe_allow_html=True)  # close content wrapper
+    st.markdown("</div>", unsafe_allow_html=True)
     st.stop()
 
 responses: Dict[str, Dict[str, int]] = {
@@ -1397,5 +1514,6 @@ for dim in MINIMUM_LEVELS.keys():
         for line in info["items"]:
             st.markdown(f"- {line}")
 
-# Close the content wrapper div opened after the header
+# Close wrapper
 st.markdown("</div>", unsafe_allow_html=True)
+
