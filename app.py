@@ -7,7 +7,7 @@ from typing import Dict, List, Any, Optional
 import pandas as pd
 import streamlit as st
 
-st.set_page_config(page_title="MLPRALS Readiness Self-Assessment", layout="wide")
+st.set_page_config(page_title="MLPRALS Readiness Assessment", layout="wide")
 
 # ============================================================
 # Header styling
@@ -153,7 +153,7 @@ st.markdown(
       <div class="mlprals-header-inner">
         <div class="mlprals-logo">{logo_html}</div>
         <div class="mlprals-title">
-          <h1>MLPRALS Readiness Self-Assessment</h1>
+          <h1>MLPRALS Readiness Assessment</h1>
           <p>Assessment for SMEs to evaluate readiness for Machine Learning (ML) adoption.</p>
         </div>
       </div>
